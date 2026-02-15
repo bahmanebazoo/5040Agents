@@ -1,158 +1,116 @@
 """
-charts/chart_helpers.py
-توابع کمکی نمودارها + ChartPlacer با فاصله‌گذاری پیکسلی دقیق
-
-واحدها:
-    1 EMU = 1/914400 اینچ
-    1 px  = 9525 EMU  (در 96 DPI)
+charts/chart_helpers.py  — نسخه اصلاح‌شده
 """
 from openpyxl.chart.series import DataPoint
 from openpyxl.chart.label import DataLabelList
 from openpyxl.utils import get_column_letter
 
-
 # ──────────────────────────────────────────────
 # ثوابت تبدیل
 # ──────────────────────────────────────────────
-EMU_PER_PIXEL = 9525                    # 1 px = 9525 EMU (96 DPI)
-DEFAULT_ROW_HEIGHT_PX = 15              # ارتفاع پیش‌فرض هر ردیف اکسل
+# ارتفاع پیش‌فرض هر ردیف اکسل: 15 points = 20 pixels = 0.529 cm
+DEFAULT_ROW_HEIGHT_CM = 0.529
 
 
-def px_to_emu(px: int) -> int:
-    """تبدیل پیکسل به EMU"""
-    return int(px * EMU_PER_PIXEL)
+def chart_height_to_rows(chart_height_cm: float, gap_rows: int = 2) -> int:
+    """
+    تبدیل ارتفاع نمودار (سانتیمتر) به تعداد ردیف.
+    chart.height در openpyxl بر حسب سانتیمتر است.
+    """
+    return int(chart_height_cm / DEFAULT_ROW_HEIGHT_CM) + 1
 
 
 # ──────────────────────────────────────────────
-# ChartPlacer — جایگذاری دقیق نمودارها
+# ChartPlacer — جایگذاری بر اساس سلول
 # ──────────────────────────────────────────────
 class ChartPlacer:
     """
-    جایگذاری نمودارها با فاصله پیکسلی دقیق.
+    جایگذاری نمودارها با فاصله‌گذاری بر اساس واحد سلول.
 
     استراتژی:
-        ۱. محاسبه ردیف و آفست عمودی بر اساس gap_px
-        ۲. استفاده از ws.add_chart با cell string
-        ۳. بلافاصله بعد، تنظیم colOff و rowOff روی anchor نمودار
+        ۱. ارتفاع واقعی نمودار از chart.height (cm) محاسبه می‌شود
+        ۲. فاصله بین نمودارها: gap_rows سلول خالی
+        ۳. فرمول: ردیف_بعدی = ردیف_فعلی + ارتفاع_واقعی + gap_rows
 
     پارامترها:
-        start_row        : اولین ردیف مجاز (1-based)
-        right_margin_px  : فاصله از سمت راست (px) → در RTL = فاصله از ستون A
-        gap_px           : فاصله عمودی بین نمودارها (px)
-        default_chart_height_rows : ارتفاع پیش‌فرض نمودار (تعداد ردیف)
-        anchor_col       : ستون شروع نمودار (1-based). 1 = A
+        start_row    : اولین ردیف مجاز (1-based)
+        gap_rows     : تعداد ردیف‌های خالی بین دو نمودار (پیش‌فرض: ۳)
+        anchor_col   : ستون شروع نمودار (1-based). 1 = A
     """
 
     def __init__(
         self,
         start_row: int = 1,
+        gap_rows: int = 3,
+        anchor_col: int = 1,
+        # ── پارامترهای قدیمی (نادیده گرفته می‌شوند — سازگاری عقب‌گرد) ──
         right_margin_px: int = 24,
         gap_px: int = 96,
         default_chart_height_rows: int = 18,
-        anchor_col: int = 1,
     ):
-        self._start_row = start_row
-        self._right_margin_px = right_margin_px
-        self._gap_px = gap_px
-        self._default_chart_height_rows = default_chart_height_rows
-        self._anchor_col = anchor_col        # 1-based
-
-        # وضعیت داخلی
-        self._current_row = start_row        # 1-based: ردیف بعدی مجاز
+        self._anchor_col = anchor_col
+        self._gap_rows = gap_rows
+        self._current_row = start_row
         self._is_first = True
-
-        # مقادیر EMU از قبل محاسبه شده
-        self._right_margin_emu = px_to_emu(right_margin_px)
-        self._gap_emu = px_to_emu(gap_px)
 
     # ── Properties ──
 
     @property
     def current_row(self) -> int:
-        """ردیف فعلی (1-based)"""
         return self._current_row
 
     @current_row.setter
     def current_row(self, value: int):
         self._current_row = value
 
-    # ── محاسبه موقعیت ──
+    # ── روش اصلی ──
 
-    def _compute_target_row_and_offset(self) -> tuple:
+    def place_chart(self, ws, chart, extra_rows: int = 0):
         """
-        محاسبه ردیف هدف (1-based) و offset عمودی (EMU).
+        جایگذاری نمودار در شیت.
 
-        Returns:
-            (target_row_1based, row_offset_emu)
-        """
-        if self._is_first:
-            return self._current_row, 0
-
-        # gap_px را به ردیف‌های کامل + باقیمانده تقسیم می‌کنیم
-        gap_full_rows = self._gap_px // DEFAULT_ROW_HEIGHT_PX
-        gap_remainder_px = self._gap_px % DEFAULT_ROW_HEIGHT_PX
-
-        target_row = self._current_row + gap_full_rows
-        row_offset_emu = px_to_emu(gap_remainder_px)
-
-        return target_row, row_offset_emu
-
-    # ── روش اصلی: place_chart ──
-
-    def place_chart(self, ws, chart, custom_height_rows: int = None):
-        """
-        جایگذاری نمودار با دقت پیکسلی.
+        ارتفاع واقعی نمودار از chart.height (cm) محاسبه می‌شود.
+        extra_rows: ردیف‌های اضافی (برای نمودارهایی با Legend بزرگ و...)
 
         مراحل:
-          1. محاسبه ردیف و آفست
-          2. ws.add_chart با cell string
-          3. تنظیم colOff و rowOff روی anchor
-
-        Args:
-            ws: شیت اکسل
-            chart: نمودار openpyxl
-            custom_height_rows: ارتفاع سفارشی (ردیف)
+            1. محاسبه ردیف هدف
+            2. ws.add_chart(chart, cell_ref)
+            3. به‌روزرسانی current_row
         """
-        target_row, row_off_emu = self._compute_target_row_and_offset()
-        col_letter = get_column_letter(self._anchor_col)
+        # ردیف هدف
+        if self._is_first:
+            target_row = self._current_row
+        else:
+            target_row = self._current_row + self._gap_rows
 
-        # ── مرحله ۱: اضافه کردن نمودار با cell reference ──
+        # ساخت cell reference
+        col_letter = get_column_letter(self._anchor_col)
         cell_ref = f"{col_letter}{target_row}"
+
+        # اضافه کردن نمودار
         ws.add_chart(chart, cell_ref)
 
-        # ── مرحله ۲: تنظیم آفست‌های پیکسلی روی anchor ──
-        # وقتی ws.add_chart صدا زده می‌شود، openpyxl یک TwoCellAnchor
-        # می‌سازد و آن را در chart.anchor ذخیره می‌کند.
-        # anchor._from یک AnchorMarker است با col, colOff, row, rowOff
-        anchor = chart.anchor
+        # محاسبه ارتفاع واقعی از chart.height (cm)
+        actual_rows = chart_height_to_rows(chart.height) + extra_rows
 
-        if hasattr(anchor, '_from'):
-            # TwoCellAnchor — حالت عادی
-            anchor._from.colOff = self._right_margin_emu
-            anchor._from.rowOff = row_off_emu
-        elif hasattr(anchor, 'col'):
-            # اگر مستقیم AnchorMarker باشد
-            anchor.colOff = self._right_margin_emu
-            anchor.rowOff = row_off_emu
-
-        # ── مرحله ۳: به‌روزرسانی ردیف فعلی ──
-        chart_h = custom_height_rows or self._default_chart_height_rows
-        self._current_row = target_row + chart_h
+        # به‌روزرسانی وضعیت
+        self._current_row = target_row + actual_rows
         self._is_first = False
-
-    # ── روش ساده (بدون آفست پیکسلی) — برای سازگاری عقب‌گرد ──
 
     def next_anchor(self, custom_height: int = None) -> str:
         """
-        فقط cell string برمی‌گرداند (بدون آفست پیکسلی).
-        برای مواقعی که place_chart قابل استفاده نیست.
-
-        ⚠️ توصیه: از place_chart استفاده کنید.
+        سازگاری عقب‌گرد — فقط cell string برمی‌گرداند.
+        ⚠️ این متد ارتفاع واقعی نمودار رو نمی‌دونه.
+           اگه ازش استفاده می‌کنید، custom_height رو درست بدید.
         """
-        target_row, _ = self._compute_target_row_and_offset()
+        if self._is_first:
+            target_row = self._current_row
+        else:
+            target_row = self._current_row + self._gap_rows
+
         col_letter = get_column_letter(self._anchor_col)
 
-        chart_h = custom_height or self._default_chart_height_rows
+        chart_h = custom_height or 30  # فرض محافظه‌کارانه
         self._current_row = target_row + chart_h
         self._is_first = False
 
@@ -180,12 +138,7 @@ def colorize_pie(chart, colors: list, count: int):
 
 
 def colorize_category_bars(chart, num_categories: int):
-    """
-    رنگ‌آمیزی هر ستون نمودار میله‌ای با رنگ متفاوت.
-
-    برای نمودارهایی که یک سری دارند ولی هر دسته باید رنگ جدا داشته باشد.
-    رنگ‌ها از پالت پیش‌فرض زیر استفاده می‌شوند:
-    """
+    """رنگ‌آمیزی هر ستون نمودار میله‌ای با رنگ متفاوت"""
     CATEGORY_PALETTE = [
         "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5",
         "70AD47", "264478", "9B57A0", "636363", "EB7E30",
@@ -195,10 +148,8 @@ def colorize_category_bars(chart, num_categories: int):
         "8DB4E2", "F4B183", "C5E0B4", "FFD966", "D6B4E0",
         "A9D08E", "BDD7EE", "F8CBAD", "E2EFDA", "FFE699",
     ]
-
     if not chart.series:
         return
-
     series = chart.series[0]
     for i in range(num_categories):
         pt = DataPoint(idx=i)
@@ -215,10 +166,7 @@ def add_data_labels(
     separator: str = "\n",
     font_size: int = 900,
 ):
-    """
-    افزودن برچسب‌های داده به نمودار.
-    separator = "\\n" → تعداد و درصد در دو خط جدا
-    """
+    """افزودن برچسب‌های داده به نمودار"""
     if not chart.series:
         return
     dl = DataLabelList()

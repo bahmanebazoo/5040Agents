@@ -136,10 +136,8 @@ def build(wb, kpi):
     # ══════════════════════════════════════════════════════════════
     placer = ChartPlacer(
         start_row=lr + 1,
-        right_margin_px=24,
-        gap_px=96,
-        default_chart_height_rows=18,
-        anchor_col=1,       # ستون A (1-based)
+        gap_rows=3,  # ← ۳ ردیف خالی بین نمودارها
+        anchor_col=1,  # ← ستون A
     )
 
     # ═══════════════════════════════════════════
@@ -290,4 +288,4 @@ def _build_scatter_chart(ws, kpi_agent, table_last_row, placer: ChartPlacer):
         current_series.marker.graphicalProperties.solidFill = color
 
     # جایگذاری با دقت پیکسلی
-    placer.place_chart(ws, scatter, custom_height_rows=22)
+    placer.place_chart(ws, scatter, extra_rows=2)
