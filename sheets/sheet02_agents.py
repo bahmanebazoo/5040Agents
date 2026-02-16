@@ -8,6 +8,7 @@
 """
 from openpyxl.chart import BarChart, LineChart, ScatterChart, Reference
 from openpyxl.chart.series import SeriesLabel
+from openpyxl.chart.marker import Marker
 from openpyxl.chart.text import RichText
 from openpyxl.drawing.text import (
     Paragraph, ParagraphProperties, CharacterProperties, RichTextProperties,
@@ -26,12 +27,8 @@ from charts.chart_helpers import ChartPlacer, apply_single_color
 # ──────────────────────────────────────────────
 
 def _remove_legend_and_rotate_x(chart, rotation=-45):
-    """
-    ۱. حذف Legend از نمودار میله‌ای
-    ۲. چرخش مورب لیبل‌های محور X
-    """
+    """حذف Legend + چرخش لیبل‌های محور X"""
     chart.legend = None
-
     chart.x_axis.txPr = RichText(
         p=[Paragraph(
             pPr=ParagraphProperties(
@@ -130,19 +127,17 @@ def build(wb, kpi):
     )
 
     # ══════════════════════════════════════════════════════════════
-    # نمودارها — فاصله‌گذاری دقیق:
-    #   ۲۴px از سمت راست
-    #   ۹۶px فاصله عمودی بین هر نمودار
+    # نمودارها
     # ══════════════════════════════════════════════════════════════
     placer = ChartPlacer(
         start_row=lr + 1,
-        gap_rows=3,  # ← ۳ ردیف خالی بین نمودارها
-        anchor_col=1,  # ← ستون A
+        right_margin_px=24,
+        gap_px=96,
+        default_chart_height_rows=18,
+        anchor_col=1,
     )
 
-    # ═══════════════════════════════════════════
-    # نمودار ۱: میانگین زمان تحویل
-    # ═══════════════════════════════════════════
+    # ═══ نمودار ۱: میانگین زمان تحویل ═══
     ch1 = BarChart()
     ch1.type = "col"
     ch1.title = "میانگین زمان تحویل به تفکیک نمایندگی (ساعت)"
@@ -160,9 +155,7 @@ def build(wb, kpi):
     _remove_legend_and_rotate_x(ch1, rotation=-45)
     placer.place_chart(ws, ch1)
 
-    # ═══════════════════════════════════════════
-    # نمودار ۲: درصد به‌موقع
-    # ═══════════════════════════════════════════
+    # ═══ نمودار ۲: درصد به‌موقع ═══
     ch2 = BarChart()
     ch2.type = "col"
     ch2.title = "درصد تحویل به‌موقع (≤۲۴ ساعت) به تفکیک نمایندگی"
@@ -179,9 +172,7 @@ def build(wb, kpi):
     _remove_legend_and_rotate_x(ch2, rotation=-45)
     placer.place_chart(ws, ch2)
 
-    # ═══════════════════════════════════════════
-    # نمودار ۳: میانگین + میانه (Combo)
-    # ═══════════════════════════════════════════
+    # ═══ نمودار ۳: میانگین + میانه (Combo) ═══
     ch3 = BarChart()
     ch3.title = "مقایسه میانگین و میانه زمان تحویل"
     ch3.y_axis.title = "ساعت"
@@ -204,12 +195,10 @@ def build(wb, kpi):
         line_median.series[0].graphicalProperties.line.width = 25000
         line_median.series[0].graphicalProperties.solidFill = CHART_SPECIFIC['median_line']
     ch3 += line_median
-    _rotate_x_labels(ch3, rotation=-45)   # Legend باقی می‌ماند (Combo)
+    _rotate_x_labels(ch3, rotation=-45)
     placer.place_chart(ws, ch3)
 
-    # ═══════════════════════════════════════════
-    # نمودار ۴: انحراف معیار
-    # ═══════════════════════════════════════════
+    # ═══ نمودار ۴: انحراف معیار ═══
     ch4 = BarChart()
     ch4.type = "col"
     ch4.title = "انحراف معیار زمان تحویل (پایداری عملکرد)"
@@ -226,13 +215,15 @@ def build(wb, kpi):
     _remove_legend_and_rotate_x(ch4, rotation=-45)
     placer.place_chart(ws, ch4)
 
-    # ═══════════════════════════════════════════
-    # نمودار ۵: Scatter — از جدول موجود بالا
-    # ═══════════════════════════════════════════
+    # ═══ نمودار ۵: Scatter ═══
     _build_scatter_chart(ws, kpi_agent, lr, placer)
 
     return ws
 
+
+# ──────────────────────────────────────────────
+# Scatter — مستقیم از جدول اصلی
+# ──────────────────────────────────────────────
 
 def _build_scatter_chart(ws, kpi_agent, table_last_row, placer: ChartPlacer):
     """
@@ -248,7 +239,7 @@ def _build_scatter_chart(ws, kpi_agent, table_last_row, placer: ChartPlacer):
     min_marker = 8
     max_marker = 35
 
-    data_start_row = 3
+    data_start_row = 3  # اولین ردیف داده در جدول بالا
 
     scatter = ScatterChart()
     scatter.title = "پراکندگی: تعداد سفارشات vs میانگین زمان تحویل"
@@ -265,10 +256,14 @@ def _build_scatter_chart(ws, kpi_agent, table_last_row, placer: ChartPlacer):
         y_ref = Reference(ws, min_col=3, min_row=r, max_row=r)
 
         scatter.add_data(y_ref, titles_from_data=False)
-
         current_series = scatter.series[-1]
         current_series.xvalues = x_ref
+
+        # نام نمایندگی
         current_series.tx = SeriesLabel(v=agent)
+
+        # رنگ
+        color = SCATTER_COLORS[i % len(SCATTER_COLORS)]
 
         # اندازه مارکر متناسب با حجم
         count = kpi_agent.loc[agent, 'تعداد_مرسوله']
@@ -278,14 +273,13 @@ def _build_scatter_chart(ws, kpi_agent, table_last_row, placer: ChartPlacer):
         else:
             marker_size = min_marker
 
-        current_series.graphicalProperties.line.noFill = True
-
-        color = SCATTER_COLORS[i % len(SCATTER_COLORS)]
-        current_series.graphicalProperties.solidFill = color
-
-        from openpyxl.chart.marker import Marker
+        # ── ۱. مارکر ──
         current_series.marker = Marker(symbol='circle', size=marker_size)
         current_series.marker.graphicalProperties.solidFill = color
+        current_series.marker.graphicalProperties.line.solidFill = color
 
-    # جایگذاری با دقت پیکسلی
-    placer.place_chart(ws, scatter, extra_rows=2)
+        # ── ۲. حذف خط اتصال — روش سازگار با همه نسخه‌ها ──
+        current_series.graphicalProperties.line.noFill = True
+
+    # جایگذاری
+    placer.place_chart(ws, scatter, extra_rows=22)

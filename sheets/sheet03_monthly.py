@@ -87,6 +87,8 @@ def build(wb, kpi):
     )
     combo.set_categories(Reference(ws, min_col=1, min_row=3, max_row=lr - 1))
     combo.y_axis.title = "تعداد"
+    combo.dataLabels = DataLabelList()
+    combo.dataLabels.showVal = True
 
     lo = LineChart()
     lo.add_data(
@@ -112,6 +114,8 @@ def build(wb, kpi):
         titles_from_data=True,
     )
     area.set_categories(Reference(ws, min_col=1, min_row=3, max_row=lr - 1))
+    area.dataLabels = DataLabelList()
+    area.dataLabels.showVal = True
     ws.add_chart(area, placer.next_anchor())
 
     # نمودار ۴: میانگین و میانه ماهانه
@@ -134,6 +138,8 @@ def build(wb, kpi):
         lc_mm_med.series[0].graphicalProperties.line.dashStyle = "dash"
     lc_mm.set_categories(Reference(ws, min_col=1, min_row=3, max_row=lr - 1))
     lc_mm += lc_mm_med
+    lc_mm.dataLabels = DataLabelList()
+    lc_mm.dataLabels.showVal = True
     ws.add_chart(lc_mm, placer.next_anchor())
 
     return ws

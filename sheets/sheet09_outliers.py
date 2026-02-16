@@ -47,20 +47,35 @@ def build(wb, kpi):
     # تعداد پرت به تفکیک نمایندگی
     outlier_by_agent = df_out.groupby('نمایندگی').size().sort_values(ascending=False)
     sr = lr + 2
-    ws.cell(row=sr, column=1, value='نمایندگی')
-    ws.cell(row=sr, column=2, value='تعداد پرت')
-    for i, (agent, cnt) in enumerate(outlier_by_agent.items()):
-        ws.cell(row=sr + 1 + i, column=1, value=agent)
-        ws.cell(row=sr + 1 + i, column=2, value=int(cnt))
+    pivot_rows = [[agent, int(cnt)] for agent, cnt in outlier_by_agent.items()]
+    pivot_lr = write_table(
+        ws,
+        ['نمایندگی', 'تعداد پرت'],
+        pivot_rows,
+        sr,
+        '📊 تعداد مرسولات پرت به تفکیک نمایندگی',
+    )
+
+    placer = ChartPlacer(start_row=pivot_lr + 1)
+
 
     placer = ChartPlacer(start_row=sr + len(outlier_by_agent) + 2)
 
+    # ═══════════════════════════════════════════════════════
+    # نمودار: ستونی عمودی با اسامی مورب (بدون Legend)
+    # ═══════════════════════════════════════════════════════
+    placer = ChartPlacer(start_row=sr + len(outlier_by_agent) + 2)
+
     ch = BarChart()
-    ch.type = "bar"
+    ch.type = "col"  # ✅ ستونی عمودی
     ch.title = "تعداد مرسولات پرت به تفکیک نمایندگی"
+    ch.y_axis.title = "تعداد"
+    ch.x_axis.title = "نمایندگی"
     ch.style = 10
     ch.width = 30
     ch.height = 16
+    ch.legend = None  # ✅ حذف Legend
+
     ch.add_data(
         Reference(ws, min_col=2, min_row=sr, max_row=sr + len(outlier_by_agent)),
         titles_from_data=True,
@@ -68,8 +83,39 @@ def build(wb, kpi):
     ch.set_categories(
         Reference(ws, min_col=1, min_row=sr + 1, max_row=sr + len(outlier_by_agent))
     )
+
+    # ✅ چرخش مورب اسامی نمایندگی‌ها (مثل sheet02 و sheet08)
+    from openpyxl.chart.text import RichText
+    from openpyxl.drawing.text import (
+        Paragraph, ParagraphProperties, CharacterProperties, RichTextProperties,
+    )
+
+    ch.x_axis.txPr = RichText(
+        p=[Paragraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=900, b=False)
+            ),
+            endParaRPr=CharacterProperties(sz=900),
+        )],
+        bodyPr=RichTextProperties(
+            rot=-45 * 60000,  # -45 درجه
+            spcFirstLastPara=True,
+            vertOverflow='ellipsis',
+            vert='horz',
+            wrap='square',
+            anchor='ctr',
+            anchorCtr=True,
+        ),
+    )
+    ch.x_axis.tickLblPos = 'low'
+    ch.x_axis.delete = False
+
+    # رنگ قرمز مخصوص Outlier
     apply_single_color(ch, CHART_SPECIFIC['outlier_bar'])
+
+    # برچسب‌های داده
     add_data_labels(ch, show_val=True)
+
     ws.add_chart(ch, placer.next_anchor())
 
     return ws

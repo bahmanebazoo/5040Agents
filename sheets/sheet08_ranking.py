@@ -1,13 +1,18 @@
 """
 شیت ۸: رتبه‌بندی نمایندگی‌ها
 """
-from openpyxl.chart import BarChart, RadarChart, Reference
+from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.series import DataPoint
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (
+    Paragraph, ParagraphProperties, CharacterProperties, RichTextProperties,
+)
 from openpyxl.formatting.rule import ColorScaleRule
 
-from config.colors import CHART_SPECIFIC, CF_COLORS
-from styles.excel_styles import write_table, auto_width, style_header
-from charts.chart_helpers import ChartPlacer, apply_single_color, add_data_labels
+from config.colors import CF_COLORS
+from styles.excel_styles import write_table, auto_width
+from charts.chart_helpers import ChartPlacer
 
 
 def build(wb, kpi, scoring):
@@ -41,59 +46,88 @@ def build(wb, kpi, scoring):
 
     placer = ChartPlacer(start_row=lr + 1)
 
-    # نمودار امتیاز (تک‌رنگ - محور = نمایندگی)
-    ch = BarChart()
-    ch.type = "bar"
-    ch.title = "رتبه‌بندی نمایندگی‌ها (امتیاز ترکیبی)"
-    ch.x_axis.title = "امتیاز"
-    ch.style = 10
-    ch.width = 35
-    ch.height = 22
-    ch.add_data(
+    # ───────────────────────────────────────────────
+    # نمودار رتبه‌بندی (ستونی عمودی با رنگ‌بندی هوشمند)
+    # ───────────────────────────────────────────────
+    chart = BarChart()
+    chart.type = "col"  # ✅ ستونی عمودی
+    chart.title = "رتبه‌بندی نمایندگی‌ها (امتیاز ترکیبی)"
+    chart.y_axis.title = "امتیاز"
+    chart.x_axis.title = "نمایندگی"
+    chart.width = 36
+    chart.height = 20
+    chart.style = 10
+    chart.legend = None  # حذف Legend
+
+    chart.add_data(
         Reference(ws, min_col=7, min_row=2, max_row=lr - 1),
         titles_from_data=True,
     )
-    ch.set_categories(Reference(ws, min_col=2, min_row=3, max_row=lr - 1))
-    apply_single_color(ch, CHART_SPECIFIC['ranking_bar'])
-    add_data_labels(ch, show_val=True)
-    ws.add_chart(ch, placer.next_anchor(custom_height=24))
-
-    # ─── Radar Top 5 ───
-    top5 = scoring.head(5).index.tolist()
-
-    sr_radar = placer.current_row + 2
-    ws.cell(row=sr_radar, column=1, value='معیار')
-    for ci, agent in enumerate(top5, 2):
-        ws.cell(row=sr_radar, column=ci, value=agent)
-
-    radar_metrics = ['امتیاز میانگین', 'درصد به‌موقع', 'پایداری (انحراف معیار)']
-    for mi, metric in enumerate(radar_metrics):
-        r = sr_radar + 1 + mi
-        ws.cell(row=r, column=1, value=metric)
-        for ci, agent in enumerate(top5, 2):
-            if metric == 'امتیاز میانگین':
-                ws.cell(row=r, column=ci, value=round(scoring.loc[agent, 'score_avg'], 1))
-            elif metric == 'درصد به‌موقع':
-                ws.cell(row=r, column=ci, value=scoring.loc[agent, 'درصد_بموقع'])
-            else:
-                ws.cell(row=r, column=ci, value=round(scoring.loc[agent, 'score_std'], 1))
-
-    radar = RadarChart()
-    radar.type = "filled"
-    radar.title = "مقایسه رادار ۵ نمایندگی برتر"
-    radar.style = 10
-    radar.width = 25
-    radar.height = 18
-    for ci in range(2, 2 + len(top5)):
-        radar.add_data(
-            Reference(ws, min_col=ci, min_row=sr_radar,
-                      max_row=sr_radar + len(radar_metrics)),
-            titles_from_data=True,
-        )
-    radar.set_categories(
-        Reference(ws, min_col=1, min_row=sr_radar + 1,
-                  max_row=sr_radar + len(radar_metrics))
+    chart.set_categories(
+        Reference(ws, min_col=2, min_row=3, max_row=lr - 1)
     )
-    ws.add_chart(radar, f"A{sr_radar + len(radar_metrics) + 2}")
+
+    # ── چرخش مورب اسم نمایندگی‌ها (دقیقاً مثل sheet02) ──
+    chart.x_axis.txPr = RichText(
+        p=[Paragraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=900, b=False)
+            ),
+            endParaRPr=CharacterProperties(sz=900),
+        )],
+        bodyPr=RichTextProperties(
+            rot=-45 * 60000,  # -45 درجه
+            spcFirstLastPara=True,
+            vertOverflow='ellipsis',
+            vert='horz',
+            wrap='square',
+            anchor='ctr',
+            anchorCtr=True,
+        ),
+    )
+    chart.x_axis.tickLblPos = 'low'
+    chart.x_axis.delete = False
+
+    # ── رنگ‌بندی میله‌ها: سبز (۵ برتر)، قرمز (۵ ضعیف‌تر)، آبی (بقیه) ──
+    total_agents = len(scoring)
+    series = chart.series[0]
+
+    for i in range(total_agents):
+        pt = DataPoint(idx=i)
+        if i < 5:
+            # ۵ نفر برتر: سبز
+            pt.graphicalProperties.solidFill = "27AE60"
+        elif i >= total_agents - 5:
+            # ۵ نفر ضعیف‌تر: قرمز
+            pt.graphicalProperties.solidFill = "E74C3C"
+        else:
+            # بقیه: آبی
+            pt.graphicalProperties.solidFill = "4472C4"
+        series.data_points.append(pt)
+
+    # ── برچسب‌های داده با چرخش عمودی (90 درجه) ──
+    dl = DataLabelList()
+    dl.showVal = True
+    dl.showPercent = False
+    dl.showCatName = False
+    dl.showSerName = False
+
+    # تنظیم چرخش عمودی برچسب‌ها
+    dl.txPr = RichText(
+        p=[Paragraph(
+            pPr=ParagraphProperties(
+                defRPr=CharacterProperties(sz=900, b=False)
+            ),
+        )],
+        bodyPr=RichTextProperties(
+            rot=-90 * 60000,  # -90 درجه (عمودی)
+            vert='horz',
+        ),
+    )
+
+    series.dLbls = dl
+
+    # جایگذاری نمودار در شیت
+    ws.add_chart(chart, placer.next_anchor(custom_height=22))
 
     return ws
